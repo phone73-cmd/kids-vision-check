@@ -3,9 +3,14 @@
 /* Measurement surface stays white irrespective of the decorative theme. */
 body.testing{background:white}body.testing .shell{max-width:760px}body.testing header,body.testing footer{display:none}.test-top{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:#687460;gap:10px}.progress{height:5px;background:#edf0e8;border-radius:4px;margin:14px 0 0;overflow:hidden}.progress div{height:100%;background:#9cb18c}.test-instruction{text-align:center;font-size:14px;color:#777;margin:18px 0}.target-stage{height:310px;display:grid;place-items:center;position:relative;background:white;margin:10px 0 15px;overflow:visible}.target-stage svg{display:block;flex-shrink:0}.answers{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:360px;margin:auto}.answers button{font-family:system-ui,sans-serif;font-size:28px;background:#f1f4eb;color:#5d7453;border:1px solid #e1e7da;height:56px;padding:0}.answers .up{grid-column:2}.answers .left{grid-row:2;grid-column:1}.answers .down{grid-row:2;grid-column:2}.answers .right{grid-row:2;grid-column:3}.unknown{display:block;width:min(100%,360px);margin:12px auto;background:#f3f2ed;font-size:15px}.eye-intro{text-align:center;padding:15px 0}.eye-intro .eye-symbol{font-size:56px;color:#8ba07b;line-height:1.4}.test-ended{color:#647c57;font-size:13px}.result-sub{font-size:12px;color:var(--muted);text-align:center}.print-only{display:none}@keyframes drift{to{transform:translateX(22px)}}@keyframes flutter{to{transform:translate(18px,-10px) rotate(10deg)}}@media(max-width:480px){.shell{padding:16px 18px max(22px,env(safe-area-inset-bottom))}.brand{font-size:18px}.hero{padding-top:22px}h1{font-size:31px}.sky{height:220px}.cards{gap:12px}.tile{padding:18px 16px;min-height:170px}.tile strong{font-size:21px}.panel{padding:22px 18px}.target-stage{height:290px}.section-head h1{font-size:24px}}@media(max-width:360px){.brand{font-size:16px}.tile strong{font-size:19px}.tile{padding:16px 12px}.sky{height:205px}.friend{width:160px;height:160px}}@media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}@media print{header,footer,button,.actions,.note{display:none!important}.shell{max-width:none}body{background:white}.panel{break-inside:avoid}.print-only{display:block}}
 
-/* Picture practice uses original vector drawings and keeps response options separate. */
-.picture-answers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;max-width:420px;margin:12px auto}
-.picture-answers button{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;min-width:0;min-height:80px;padding:6px 2px;font-size:13px;background:#f1f4eb;color:#455b3e}
-.picture-answers svg{display:block;width:56px;height:56px;flex-shrink:0}
-.picture-answers span{white-space:nowrap}
-@media(max-width:360px){.picture-answers{gap:5px}.picture-answers svg{width:50px;height:50px}}
+/* v1.2.0: wider garden flights, random depth, and small cloud offsets. */
+.sky{isolation:isolate}.sky:after{z-index:0}.sun,.cloud{z-index:0}
+.cloud{top:14px}.cloud.second{right:76px;top:56px}
+.garden-flier{position:absolute;left:0;top:0;width:45px;height:45px;pointer-events:none;z-index:1;will-change:transform}
+.garden-flier img{display:block;width:45px;height:45px;object-fit:contain}
+.grasshopper{position:absolute;width:34px;height:30px;object-fit:contain;z-index:5;pointer-events:none}
+.direction-answers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;max-width:330px;margin:12px auto}
+.number-answers{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;max-width:380px;margin:12px auto}
+.direction-answers button,.number-answers button{min-width:0;padding:8px 4px;min-height:48px;font:500 25px/1.3 system-ui,sans-serif;background:#f1f4eb;border:1px solid #e1e7da;color:#5d7453}
+@media(max-width:360px){.test-top{font-size:12px;flex-wrap:wrap}.number-answers{gap:6px}}
+@media(prefers-reduced-motion:reduce){.garden-flier{will-change:auto}}
