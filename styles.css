@@ -24,3 +24,22 @@ body.testing{background:white}body.testing .shell{max-width:760px}body.testing h
 .sky[data-period=night] .cloud{filter:brightness(.78);opacity:.85}
 @media(prefers-reduced-motion:reduce){.celestial{transition:none}}
 #target>svg{width:100%;height:100%}
+
+/* The same six status layers used in Learning Garden, in fixed 44px slots. */
+header{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:8px;position:relative}
+.brand{min-width:0;white-space:normal;word-break:keep-all;font-size:clamp(14px,4vw,20px);line-height:1.5}
+.offline-toolbar{display:flex;width:132px;justify-self:end;align-items:center}
+.status-icon{position:relative;display:block;width:44px;height:44px;min-height:44px;flex:0 0 44px;padding:0;border:0;background:transparent;border-radius:12px}
+.status-icon img{position:absolute;inset:4px;width:36px;height:36px;object-fit:contain;pointer-events:none}
+.status-icon[data-preparing=true]:after{content:'';position:absolute;inset:3px;border:2px solid var(--line);border-top-color:var(--green);border-radius:50%;animation:status-spin 1.6s linear infinite;pointer-events:none}
+.status-dot{position:absolute;right:3px;top:2px;width:9px;height:9px;border-radius:50%;background:#e8a251;box-shadow:0 0 0 2px var(--bg);pointer-events:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#offline-progress:empty,#offline-notice:empty,#storage-notice:empty,#delete-error:empty{display:none}
+#offline-notice,#storage-notice,#delete-error{color:#a15f5f}
+.grasshopper{will-change:transform}
+@keyframes status-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.status-icon[data-preparing=true]:after{animation:none}.grasshopper{will-change:auto}}
+/* Brand icon and text share one flex row and the same visual center. */
+.brand{display:inline-flex;align-items:center;gap:7px;text-decoration:none}
+.brand-flower{display:inline-flex;align-items:center;justify-content:center;flex:0 0 1em;line-height:1;vertical-align:initial;margin:0;font-size:1.35em}
+.brand-title{display:block;min-width:0;line-height:1.45}
