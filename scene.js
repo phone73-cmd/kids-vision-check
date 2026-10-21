@@ -1,6 +1,14 @@
 // One home-scene owner: no timers or observers survive leaving the home screen.
 let cleanup=null;
 export function stopGardenScene(){cleanup?.();cleanup=null;}
+export function skyState(date=new Date()){
+ const minutes=date.getHours()*60+date.getMinutes()+date.getSeconds()/60;
+ const night=minutes<360||minutes>=1140;
+ const period=night?'night':minutes>=960?'dusk':'day';
+ const progress=night?((minutes<360?minutes+1440:minutes)-1140)/660:(minutes-360)/780;
+ return {period,kind:night?'moon':'sun',progress,left:progress*100,top:14+32*(1-Math.sin(Math.PI*progress))};
+}
+export function celestialMarkup(date=new Date()){const sky=skyState(date);return `<img class="celestial" src="assets/scene/${sky.kind}.webp" style="left:calc(${sky.left}% + ${32-64*sky.progress}px);top:${sky.top}px" width="58" height="58" alt="" draggable="false">`;}
 export function grasshopperLayout(random=Math.random){
  const count=1+Math.floor(random()*2);
  return Array.from({length:count},(_,i)=>({left:(i?62:10)+random()*18,bottom:5+random()*7,face:random()<.5?-1:1}));
@@ -21,6 +29,9 @@ export function flightRoute(width,height,start,random=Math.random){
 export function bindGardenScene(root){
  stopGardenScene();const sky=root.querySelector('.sky'),flier=sky?.querySelector('.garden-flier');if(!flier)return;
  let active=true,animation=null,point=null;
+ let skyTimer=null;
+ function updateSky(){if(!active)return;const now=new Date(),value=skyState(now);sky.dataset.period=value.period;const body=sky.querySelector('.celestial');if(body){const src=`assets/scene/${value.kind}.webp`;const changed=body.getAttribute('src')!==src;body.style.transition=changed?'none':'';if(changed)body.setAttribute('src',src);body.style.left=`calc(${value.left}% + ${32-64*value.progress}px)`;body.style.top=`${value.top}px`;}clearTimeout(skyTimer);skyTimer=setTimeout(updateSky,30000-(Date.now()%30000));}
+ updateSky();
  const reduced=matchMedia('(prefers-reduced-motion: reduce)');
  function run(){if(!active)return;animation?.cancel();const route=flightRoute(sky.clientWidth,sky.clientHeight,point);point=route.end;
   flier.style.zIndex=route.front?'4':'1';
@@ -30,8 +41,8 @@ export function bindGardenScene(root){
   animation=flier.animate(route.frames.map(p=>({transform:`translate3d(${p.x}px,${p.y}px,0)`})),{duration:route.duration,easing:'linear',fill:'forwards'});
   animation.onfinish=run;if(document.hidden)animation.pause();
  }
- const visible=()=>{if(document.hidden)animation?.pause();else animation?.play();};
+ const visible=()=>{if(document.hidden)animation?.pause();else {updateSky();animation?.play();}};
  const resize=new ResizeObserver(()=>{point=null;run();});resize.observe(sky);
  const motion=()=>{point=null;run();};reduced.addEventListener('change',motion);document.addEventListener('visibilitychange',visible);run();
- cleanup=()=>{active=false;animation?.cancel();resize.disconnect();reduced.removeEventListener('change',motion);document.removeEventListener('visibilitychange',visible);};
+ cleanup=()=>{active=false;clearTimeout(skyTimer);animation?.cancel();resize.disconnect();reduced.removeEventListener('change',motion);document.removeEventListener('visibilitychange',visible);};
 }
