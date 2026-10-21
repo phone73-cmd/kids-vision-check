@@ -27,15 +27,16 @@ export function flightRoute(width,height,start,random=Math.random){
  return {frames,end,face:right?1:-1,front:random()<.5,duration:8500+random()*6500};
 }
 export function hopDelay(random=Math.random){return 7000+Math.floor(random()*8001);}
-export function hopPlan(width,start,random=Math.random){
+export function hopPlan(width,start,face=1,random=Math.random){
  const min=Math.min(8,Math.max(0,(width-34)/2)),max=Math.max(min,width-34-min);
  const from=Math.max(min,Math.min(max,start));
- let direction=random()<.5?-1:1;const distance=15+random()*20;
- if(from+distance*direction<min||from+distance*direction>max)direction*=-1;
- const end=Math.max(min,Math.min(max,from+distance*direction));
- const height=10+random()*10;
+ // The original sprite faces left: scaleX(1) moves toward decreasing x.
+ const forward=-face,distance=15+random()*20;
+ const turn=random()<.25||from+distance*forward<min||from+distance*forward>max;
+ if(turn)return {action:'turn',from,end:from,height:0,frames:[{x:from,y:0}],face:-face,duration:0};
+ const end=from+distance*forward,height=10+random()*10;
  const frames=Array.from({length:21},(_,i)=>{const t=i/20;return {x:from+(end-from)*t,y:-4*height*t*(1-t)};});
- return {from,end,height,frames,face:end<from?-1:1,duration:520+random()*180};
+ return {action:'hop',from,end,height,frames,face,duration:520+random()*180};
 }
 function bindGrasshoppers(sky,reduced){
  let alive=true;
@@ -45,8 +46,9 @@ function bindGrasshoppers(sky,reduced){
  function schedule(c){clear(c);if(!alive||document.hidden||reduced.matches||!c.el.animate)return;c.timer=setTimeout(()=>jump(c),hopDelay());}
  function jump(c){
   c.timer=null;if(!alive||document.hidden||reduced.matches)return;
-  const plan=hopPlan(sky.clientWidth,c.el.offsetLeft);c.start=plan.from;c.el.style.left=`${plan.from}px`;
+  const plan=hopPlan(sky.clientWidth,c.el.offsetLeft,c.el.style.transform.includes('-1')?-1:1);c.start=plan.from;c.el.style.left=`${plan.from}px`;
   c.el.style.transform=`scaleX(${plan.face})`;
+  if(plan.action==='turn'){schedule(c);return;}
   c.animation=c.el.animate(plan.frames.map(p=>({transform:`translate3d(${p.x-plan.from}px,${p.y}px,0) scaleX(${plan.face})`})),{duration:plan.duration,easing:'linear',fill:'forwards'});
   c.animation.onfinish=()=>{if(!alive)return;c.el.style.left=`${plan.end}px`;c.el.style.transform=`scaleX(${plan.face})`;c.animation.cancel();c.animation=null;schedule(c);};
  }

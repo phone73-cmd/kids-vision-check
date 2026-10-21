@@ -1,32 +1,31 @@
-// Browser history stores route keys only. Session snapshots stay in this tab's memory.
+// Keep route snapshots in tab storage; browser history contains only route keys.
 const clone=value=>JSON.parse(JSON.stringify(value));
-export function createAppNavigation({initial,apply,canLeave,history:browserHistory=globalThis.history,eventTarget=globalThis.window}){
- const owner=`eye-garden-${Date.now()}-${Math.random()}`;
- let current=0,next=1,restoring=false;
- const snapshots=new Map([[0,clone(initial)]]);
+export function createAppNavigation({initial,apply,canLeave,restored,history:browserHistory=globalThis.history,eventTarget=globalThis.window}){
+ const valid=restored&&restored.owner===browserHistory.state?.eyeGarden&&restored.current===browserHistory.state?.index&&Array.isArray(restored.snapshots)&&Array.isArray(restored.parents);
+ const owner=valid?restored.owner:`eye-garden-${Date.now()}-${Math.random()}`;
+ let current=valid?restored.current:0,next=valid?restored.next:1,restoring=false,queued=null,bypass=null;
+ const snapshots=new Map(valid?restored.snapshots:[[0,clone(initial)]]);
+ const parents=new Map(valid?restored.parents:[[0,null]]);
+ snapshots.set(current,clone(initial));
  const state=index=>({eyeGarden:owner,index});
- browserHistory.replaceState(state(0),'');
+ browserHistory.replaceState(state(current),'');
  function push(snapshot,{replace=false}={}){
   if(replace){snapshots.set(current,clone(snapshot));browserHistory.replaceState(state(current),'');return;}
-  const index=next++;snapshots.set(index,clone(snapshot));
-  // Record the actual parent link; branch IDs need not be consecutive after Back.
-  parents.set(index,current);current=index;browserHistory.pushState(state(index),'');
+  const index=next++;snapshots.set(index,clone(snapshot));parents.set(index,current);current=index;browserHistory.pushState(state(index),'');
  }
- const parents=new Map([[0,null]]);
- const trail=index=>{const a=[];while(index!==null&&index!==undefined){a.push(index);index=parents.get(index);}return a.reverse();};
- function distance(from,to){const a=trail(from),b=trail(to);let i=0;while(i<a.length&&i<b.length&&a[i]===b[i])i++;return b.length-a.length;}
+ function depth(index){let n=0;const seen=new Set();while(parents.get(index)!=null&&!seen.has(index)){seen.add(index);index=parents.get(index);n++;}return n;}
+ const distance=(from,to)=>depth(to)-depth(from);
+ function proceed(target){if(restoring){queued=target;return;}bypass=target;browserHistory.go(distance(current,target));}
  function pop(event){
   const incoming=event.state;
-  if(restoring){restoring=false;return;}
+  if(restoring){restoring=false;if(queued!==null){const target=queued;queued=null;proceed(target);}return;}
   if(incoming?.eyeGarden!==owner||!snapshots.has(incoming.index))return;
   const target=incoming.index;
-  if(canLeave&&!canLeave()){
-   const delta=-distance(current,target);
-   // Back/Forward within this route chain always has a nonzero distance.
-   restoring=true;browserHistory.go(delta);return;
+  if(bypass!==target&&canLeave&&!canLeave({proceed:()=>proceed(target)})){
+   restoring=true;browserHistory.go(-distance(current,target));return;
   }
-  current=target;apply(clone(snapshots.get(target)));
+  bypass=null;current=target;apply(clone(snapshots.get(target)));
  }
  eventTarget.addEventListener('popstate',pop);
- return {push,stop:()=>eventTarget.removeEventListener('popstate',pop)};
+ return {push,serialize:()=>({owner,current,next,snapshots:[...snapshots],parents:[...parents]}),stop:()=>eventTarget.removeEventListener('popstate',pop)};
 }

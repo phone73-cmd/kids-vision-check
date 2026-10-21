@@ -1,6 +1,7 @@
 import { initOffline } from './offline.js';
 import { deleteStoredRecord } from './records.js';
 import { createAppNavigation } from './navigation.js';
+import { saveProgress, loadProgress } from './progress.js';
 import { TEST_MODES, modeName, modeDescription, randomTarget, optotypeSvg, answerButtons, summaryForRecord, NUMBER_STYLE } from './optotypes.js';
 import { sceneMarkup, celestialMarkup, skyState, bindGardenScene, stopGardenScene } from './scene.js';
 import { VERSION, LEVELS, displaySize, evaluateLevel } from './vision.js';
@@ -10,8 +11,8 @@ const KEY='kids-vision-check-v1';
 let state={calibration:null,records:[]};
 let saveAvailable=true;
 try {const raw=JSON.parse(localStorage.getItem(KEY)||'null');if(raw && Array.isArray(raw.records)) state={calibration:raw.calibration||null, records:raw.records.filter(r=>r && typeof r.id==='string' && Array.isArray(r.eyes) && r.eyes.length===2 && r.eyes.every(e=>Array.isArray(e.levels))).slice(0,300)};} catch {saveAvailable=false;}
-let selectedMode='e', selectedGlasses='without';
-let navigation=null, offlineUI=null, pendingDelete=null;
+let selectedMode='e', selectedGlasses='without', preparationChecks=[false,false,false], progressWarning=false;
+let navigation=null, offlineUI=null, pendingDelete=null, pendingExit=null, booting=true;
 let page='home', session=null, pxPerMm=6, completed=null, busy=false, toastTimer;
 function toast(s){$('#toast').textContent=s;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').textContent='',4000);}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));saveAvailable=true;offlineUI?.paint();return true;}catch{saveAvailable=false;offlineUI?.paint();toast('저장하지 못했어요. 기록을 내보내 주세요.');return false;}}
@@ -22,11 +23,33 @@ function summary(eye,mode){return summaryForRecord(eye,mode);}
 function nextTarget(){return randomTarget(session.mode,session.direction);}
 function top(title){return `<div class="section-head"><h1>${title}</h1><button class="ghost" data-home>홈으로</button></div>`;}
 function escape(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function routeSnapshot(){return {page,selectedMode,selectedGlasses,session:['practice','eyeIntro','test'].includes(page)?session:null,completed:page==='result'?completed:null};}
+function routeSnapshot(){return {page,selectedMode,selectedGlasses,preparationChecks,session:['practice','eyeIntro','test'].includes(page)?session:null,completed:page==='result'?completed:null};}
+function persistRoute(){if(booting)return;let ok=false;try{ok=saveProgress(sessionStorage,routeSnapshot(),navigation?.serialize());}catch{}if(!ok&&!progressWarning){progressWarning=true;toast('진행 상태를 저장하지 못했어요. 새로고침하면 이어서 검사할 수 없어요.');}}
 function paint(){document.body.classList.toggle('testing',page==='test');render();window.scrollTo(0,0);}
-function navigate(next){const replace=page==='test';if(navigation&&!replace)navigation.push(routeSnapshot(),{replace:true});page=next;paint();navigation?.push(routeSnapshot(),{replace});}
-function restoreRoute(snapshot){page=snapshot.page;selectedMode=snapshot.selectedMode||'e';selectedGlasses=snapshot.selectedGlasses||'without';session=snapshot.session;completed=snapshot.completed;busy=false;if(page==='result'&&completed&&!state.records.some(r=>r.id===completed.id)){completed=null;page='history';}if(page==='test')page='eyeIntro';if(['preparation','practice','eyeIntro'].includes(page)&&!calibrated()){session=null;page='calibration';}paint();}
-function canLeaveRoute(){if(offlineUI?.applying){toast('새 버전 적용을 마칠 때까지 잠시 기다려 주세요.');return false;}if($('#delete-dialog').open){$('#delete-dialog').close();return false;}if($('#guide').open){$('#guide').close();return false;}return page!=='test'||!session||confirm('검사를 중단하고 이전 화면으로 돌아갈까요? 진행 중인 이 눈의 응답은 저장되지 않아요.');}
+function navigate(next){const replace=page==='test';if(navigation&&!replace)navigation.push(routeSnapshot(),{replace:true});page=next;navigation?.push(routeSnapshot(),{replace});paint();}
+function restoreRoute(snapshot,{resume=false,paintNow=true}={}){
+ page=snapshot.page;selectedMode=snapshot.selectedMode||'e';selectedGlasses=snapshot.selectedGlasses||'without';session=snapshot.session;completed=snapshot.completed;preparationChecks=Array.isArray(snapshot.preparationChecks)&&snapshot.preparationChecks.length===3?snapshot.preparationChecks.map(Boolean):[false,false,false];busy=false;
+ const saved=session&&state.records.find(r=>r.id===session.id);
+ if(saved){completed=saved;session=null;page='result';}
+ if(page==='result'){completed=state.records.find(r=>r.id===completed?.id)||null;if(!completed)page='history';}
+ if(page==='test'&&!resume)page='eyeIntro';
+ if(['preparation','practice','eyeIntro','test'].includes(page)&&!calibrated()){session=null;page='calibration';}
+ if(paintNow)paint();
+}
+function requestExit(destination,proceed=null){
+ if(pendingExit)return;
+ pendingExit={destination,proceed};
+ $('#stop-title').textContent=destination==='home'?'검사를 중단하고 홈으로 갈까요?':'검사를 중단할까요?';
+ $('#stop-description').textContent='진행 중인 검사는 결과 기록에 남지 않아요. 계속하려면 취소를 눌러 주세요.';
+ $('#stop-confirm').textContent=destination==='home'?'홈으로 이동':destination==='preparation'?'중단하고 준비 화면으로':'이전 화면으로 이동';
+ $('#stop-dialog').showModal();
+}
+function confirmExit(){const exit=pendingExit;if(!exit)return;$('#stop-dialog').close();if(exit.proceed){exit.proceed();return;}session=null;completed=null;busy=false;navigate(exit.destination);}
+function canLeaveRoute({proceed}={}){
+ if(offlineUI?.applying){toast('새 버전 적용을 마칠 때까지 잠시 기다려 주세요.');return false;}
+ for(const id of ['stop-dialog','delete-dialog','guide'])if($('#'+id).open){$('#'+id).close();return false;}
+ if(page==='test'&&session){requestExit('previous',proceed);return false;}return true;
+}
 function recordType(record){return modeName(record.mode)+(record.mode==='numbers'&&!record.numberStyle?' · 이전 숫자 모양':'');}
 function home(){return `<section class="hero"><span class="eyebrow">LITTLE EYES, BLOOMING BRIGHT</span><h1>오늘도 반짝이는<br>우리 아이 눈빛</h1><p>3m 거리에서, 한쪽 눈씩 차근차근 확인해요.</p><div class="sky" data-period="${skyState().period}" aria-hidden="true">${celestialMarkup()}<img class="cloud" src="assets/scene/cloud.webp" alt=""><img class="cloud second" src="assets/scene/cloud.webp" alt="">${sceneMarkup()}<img class="friend" src="assets/friend-v1.0.1.webp" alt=""><img class="bloom one" src="assets/flowers/daisy.webp" alt=""><img class="bloom two" src="assets/flowers/tulip.webp" alt=""></div></section><p class="hero-caption">보호자와 함께하는 작은 눈빛 산책</p><div class="cards"><button class="tile" id="start"><span class="tile-icon" aria-hidden="true">◉</span><strong>눈빛 확인하기</strong><small>E자 · C자 · 숫자 선택<br>오른눈 · 왼눈까지</small><span class="tile-link">함께 시작해요 →</span></button><button class="tile pink" id="history"><span class="tile-icon" aria-hidden="true">▤</span><strong>우리 눈빛 기록</strong><small>${state.records.length}개의 기록<br>지난 확인 결과를 모아요</small><span class="tile-link">기록 살펴보기 →</span></button></div><div class="note">가정용 참고 앱이에요. 안경 도수·근시·약시를 진단하지 않으며, 안과 검사를 대신하지 않아요.</div>${!saveAvailable?'<p class="small">브라우저 저장소를 사용할 수 없어요. 검사 후 결과를 내보내 주세요.</p>':''}`;}
 function calibration(){const initial=calibrated()?state.calibration.pxPerMm:Math.min(6,(innerWidth-85)/50);pxPerMm=initial;return `${top('먼저, 화면 크기 맞추기')}<div class="steps"><span class="active">① 화면 보정</span><span>─</span><span>② 검사 준비</span><span>─</span><span>③ 눈빛 확인</span></div><div class="panel"><h2>진짜 자로 5cm를 맞춰요</h2><p>아래 양 끝 눈금 사이가 실제 자의 <strong>5cm</strong>와 같도록 길이를 조절해 주세요. 자가 없으면 정확한 크기를 맞출 수 없어 검사를 시작할 수 없어요.</p><div class="ruler-wrap"><div id="ruler" class="ruler" style="width:${initial*50}px"></div></div><label class="field">눈금 길이 조절<input id="ruler-range" type="range" min="100" max="${Math.floor(Math.min(innerWidth-70,app.clientWidth-44))}" step="0.5" value="${initial*50}"></label><div class="row"><button class="ghost" id="shorter" aria-label="눈금 길이 줄이기">− 조금 짧게</button><button class="ghost" id="longer" aria-label="눈금 길이 늘리기">+ 조금 길게</button></div><label class="check"><input type="checkbox" id="ruler-confirm"><span>실제 자로 양 끝 사이가 5cm임을 확인했어요.</span></label><button id="cal-save" class="primary wide" disabled>이 크기로 검사 준비하기</button><p class="small">확대·축소하거나 화면 방향을 바꾸면 다시 맞춰야 해요. 다른 기기에서도 새로 보정해 주세요.</p></div>`;}
@@ -34,22 +57,22 @@ function preparation(){if(!calibrated()){page='calibration';return calibration()
 function practice(){const mode=session.mode;const number=mode==='numbers';const title=number?'보이는 숫자를 읽어요':'열린 방향을 말해요';return `${top(title)}<div class="panel"><h2>${number?'어떤 숫자가 보이나요?':'어느 쪽이 열려 있나요?'}</h2><p>${modeDescription(mode)} 보호자가 같은 답을 눌러 주세요.</p><div style="width:130px;margin:25px auto">${optotypeSvg(mode,number?'5':'right')}</div>${answerButtons(mode,'data-practice')}<p id="practice-feedback" class="small" role="status">${number?'먼저 숫자 5를 골라 보세요.':'먼저 오른쪽으로 열린 모양을 연습해요.'}</p><button id="practice-done" class="primary wide" disabled>이해했어요 · 오른눈부터 확인</button></div>`;}
 function eyeIntro(){const right=session.eye===0;return `${top(right?'오른눈을 확인할 차례':'잠깐 쉬고, 왼눈도 확인해요')}<div class="panel eye-intro"><div class="eye-symbol" aria-hidden="true">◉</div><h2>${right?'왼눈을 가려 주세요':'오른눈을 가려 주세요'}</h2><p><strong>${right?'오른눈':'왼눈'}으로만</strong> 화면을 봐요.<br>가린 눈을 누르거나 틈으로 보지 않도록 해요.<br>아이가 눈을 찡그리거나 앞으로 오지 않게 도와주세요.</p><label class="check"><input type="checkbox" id="eye-ready"><span>반대쪽 눈을 가렸고, 눈 위치가 3m인지 확인했어요.</span></label><button id="eye-start" class="primary wide" disabled>${right?'오른눈':'왼눈'} 시작하기</button></div>`;}
 function testView(){const acuity=LEVELS[session.level];const eSize=displaySize(acuity,state.calibration.pxPerMm);const total=eSize*13/5;
-return `<div class="test-top"><span>${session.eye===0?'오른눈':'왼눈'} · ${session.answers.length+1}/5 · ${modeName(session.mode)}</span><span>3m 거리 유지</span><button class="ghost" id="stop">중단</button></div><div class="progress" aria-hidden="true"><div style="width:${session.level/LEVELS.length*100}%"></div></div><p class="test-instruction">${session.mode==='numbers'?'보이는 숫자를 말해 주세요.':'열린 방향을 말해 주세요.'}</p><div class="target-stage" style="height:${Math.max(260,total+28)}px"><div id="target" style="width:${total}px;height:${total}px">${optotypeSvg(session.mode,session.direction)}</div></div>${answerButtons(session.mode,'data-answer')}<button class="unknown" data-answer="unknown">잘 모르겠어요</button><p class="small" style="text-align:center">보호자만 입력해 주세요 · 아이는 제자리에서 봐요</p>`;}
+return `<div class="test-top"><span>${session.eye===0?'오른눈':'왼눈'} · ${session.answers.length+1}/5 · ${modeName(session.mode)}</span><span>3m 거리 유지</span><button class="ghost" id="stop">중단</button><button class="ghost" id="test-home">홈으로</button></div><div class="progress" aria-hidden="true"><div style="width:${session.level/LEVELS.length*100}%"></div></div><p class="test-instruction">${session.mode==='numbers'?'보이는 숫자를 말해 주세요.':'열린 방향을 말해 주세요.'}</p><div class="target-stage" style="height:${Math.max(260,total+28)}px"><div id="target" style="width:${total}px;height:${total}px">${optotypeSvg(session.mode,session.direction)}</div></div>${answerButtons(session.mode,'data-answer')}<button class="unknown" data-answer="unknown">잘 모르겠어요</button><p class="small" style="text-align:center">보호자만 입력해 주세요 · 아이는 제자리에서 봐요</p>`;}
 function result(){const r=completed;return `${top('오늘의 눈빛 기록')}<div class="panel"><p class="eyebrow">TODAY’S LITTLE STEP</p><h2>차근차근, 잘 해냈어요!</h2><div class="row">${r.eyes.map((e,i)=>`<div class="metric"><span>${i===0?'오른눈':'왼눈'}</span><strong>${summary(e,r.mode).value??'—'}</strong><span>${summary(e,r.mode).value?(r.mode==='pictures'?'그림 단계까지 통과':'단계까지 통과'):(r.mode==='pictures'?'첫 그림 단계 미통과':'0.2 단계 미통과')}</span></div>`).join('')}</div><p class="result-sub">${recordType(r)} · 3m · ${r.glasses==='with'?'안경 착용':'안경 미착용'} · 가정용 참고 결과</p>${r.mode==='pictures'?'<p>그림 구분 연습 결과예요. 1~6은 작은 그림을 구분한 순서이며, 소수시력이나 E자 결과와 대응하지 않아요. 그림마다 난이도가 다를 수 있어요.</p>':'<p>표시한 숫자는 이 앱에서 통과한 기호 크기의 단계예요. 병원에서 측정한 시력이나 안경 도수가 아니에요.</p><p class="small">0.2를 통과하지 못해도 정확한 시력이 0.2 미만이라고 단정할 수 없어요. 1.5 통과는 그보다 높은 시력을 확인했다는 뜻이 아니에요.</p>'}<p id="save-status" class="test-ended">${saveAvailable?'이 기기에 기록했어요.':'저장하지 못했어요. 결과를 내보내 주세요.'}</p><div class="actions"><button id="result-export">결과 내보내기</button><button id="history" class="primary">기록 보기</button></div></div><div class="note">한쪽 눈이 더 안 보이거나 반복해서 어려워하면 안과에서 확인해 주세요. 점수가 좋아도 근시·원시·난시·약시를 배제할 수 없어요.</div>`;}
 function history(){return `${top('우리 눈빛 기록')}<p class="small">기록은 이 기기의 현재 브라우저에만 저장돼요.</p><div class="panel">${state.records.length?state.records.map(r=>`<article class="history-item"><time>${escape(new Date(r.date).toLocaleString('ko-KR'))}</time><div class="history-values">${r.eyes.map((e,i)=>`<span>${i===0?'오른눈':'왼눈'}<br>${escape(summary(e,r.mode).label)}</span>`).join('')}</div><p class="small">${recordType(r)} · 3m · ${r.glasses==='with'?'안경 착용':'안경 미착용'}</p><button type="button" class="ghost danger" data-delete="${escape(r.id)}">이 기록 삭제</button></article>`).join(''):`<div class="empty"><img src="assets/flowers/cosmos.webp" alt=""><h2>첫 눈빛을 기록해 볼까요?</h2><p>확인을 마치면 여기에 차곡차곡 모여요.</p><button id="start" class="primary">눈빛 확인하기</button></div>`}</div>${state.records.length?'<div class="actions"><button id="export-all">전체 기록 내보내기</button></div>':''}`;}
-function render(){stopGardenScene();app.innerHTML=({home,calibration,preparation,practice,eyeIntro,test:testView,result,history}[page]||home)();bind();if(page==='home')bindGardenScene(app);}
+function render(){stopGardenScene();app.innerHTML=({home,calibration,preparation,practice,eyeIntro,test:testView,result,history}[page]||home)();bind();if(page==='home')bindGardenScene(app);persistRoute();}
 function enoughSpace(){if(!calibrated())return false;const max=displaySize(LEVELS[0],state.calibration.pxPerMm)*2.6;return max<=app.clientWidth-4;}
-function start(){navigate('calibration');}
-function abort(){if(confirm('검사를 중단할까요? 진행 중인 결과는 기록되지 않아요.')){session=null;navigate('home');}}
-function bind(){app.querySelectorAll('[data-home]').forEach(b=>b.onclick=()=>{if(session && !completed)abort();else navigate('home');});$('#start')?.addEventListener('click',start);$('#history')?.addEventListener('click',()=>navigate('history'));
+function start(){preparationChecks=[false,false,false];navigate('calibration');}
+function abort(){requestExit('preparation');}
+function bind(){app.querySelectorAll('[data-home]').forEach(b=>b.onclick=()=>{if(session && !completed)requestExit('home');else navigate('home');});$('#start')?.addEventListener('click',start);$('#history')?.addEventListener('click',()=>navigate('history'));
 if(page==='calibration'){
 const range=$('#ruler-range');function update(){pxPerMm=Number(range.value)/50;$('#ruler').style.width=`${range.value}px`;$('#ruler-confirm').checked=false;$('#cal-save').disabled=true;}
 range.oninput=update;$('#shorter').onclick=()=>{range.value=+range.value-.5;update();};$('#longer').onclick=()=>{range.value=+range.value+.5;update();};$('#ruler-confirm').onchange=e=>$('#cal-save').disabled=!e.target.checked;
 $('#cal-save').onclick=()=>{if(!unzoomed()){toast('화면 확대를 원래대로 돌린 후 다시 보정해 주세요.');return;}state.calibration={pxPerMm,signature:signature(),date:new Date().toISOString()};save();if(!enoughSpace()){toast('기호와 테두리를 표시할 공간이 부족해요. 더 큰 화면을 사용해 주세요.');return;}navigate('preparation');};}
-if(page==='preparation'){$('#glasses').onchange=e=>selectedGlasses=e.target.value;$('#test-mode').onchange=e=>{selectedMode=e.target.value;$('#mode-description').textContent=modeDescription(selectedMode);};$$('.prep-check').forEach(c=>c.onchange=()=>$('#begin').disabled=!$$('.prep-check').every(c=>c.checked));$('#begin').onclick=()=>{if(!enoughSpace()){toast('화면 크기를 다시 맞춰 주세요.');navigate('calibration');return;}session={mode:selectedMode,eye:0,level:0,answers:[],eyes:[],glasses:$('#glasses').value,direction:null};completed=null;navigate('practice');};}
+if(page==='preparation'){$('#glasses').onchange=e=>{selectedGlasses=e.target.value;persistRoute();};$('#test-mode').onchange=e=>{selectedMode=e.target.value;$('#mode-description').textContent=modeDescription(selectedMode);persistRoute();};$$('.prep-check').forEach((c,i)=>{c.checked=preparationChecks[i];c.onchange=()=>{preparationChecks=$$('.prep-check').map(c=>c.checked);$('#begin').disabled=!preparationChecks.every(Boolean);persistRoute();};});$('#begin').disabled=!preparationChecks.every(Boolean);$('#begin').onclick=()=>{if(!enoughSpace()){toast('화면 크기를 다시 맞춰 주세요.');navigate('calibration');return;}session={id:crypto.randomUUID(),mode:selectedMode,eye:0,level:0,answers:[],eyes:[],glasses:$('#glasses').value,direction:null};completed=null;navigate('practice');};}
 $$('[data-practice]').forEach(b=>b.onclick=()=>{const number=session.mode==='numbers';const correct=b.dataset.practice===(number?'5':'right');$('#practice-feedback').textContent=correct?'맞아요! 이 방식으로 대답하면 돼요.':number?'위의 숫자는 5예요. 숫자 5를 눌러 주세요.':'오른쪽이 열려 있어요. 오른쪽 화살표를 눌러 주세요.';$('#practice-done').disabled=!correct;});$('#practice-done')?.addEventListener('click',()=>navigate('eyeIntro'));
 $('#eye-ready')?.addEventListener('change',e=>$('#eye-start').disabled=!e.target.checked);$('#eye-start')?.addEventListener('click',()=>{if(!enoughSpace()){session=null;toast('화면 크기가 달라졌어요. 다시 보정해 주세요.');navigate('calibration');return;}session.direction=nextTarget();navigate('test');});
-$$('[data-answer]').forEach(b=>b.onclick=()=>answer(b.dataset.answer));$('#stop')?.addEventListener('click',abort);
+$$('[data-answer]').forEach(b=>b.onclick=()=>answer(b.dataset.answer));$('#stop')?.addEventListener('click',abort);$('#test-home')?.addEventListener('click',()=>requestExit('home'));
 $$('[data-delete]').forEach(b=>b.onclick=()=>requestDelete(b.dataset.delete));
 $('#result-export')?.addEventListener('click',()=>exportRecords([completed]));$('#export-all')?.addEventListener('click',()=>exportRecords(state.records));}
 function $$(s){return [...app.querySelectorAll(s)];}
@@ -57,9 +80,11 @@ function answer(direction){if(busy || page!=='test')return;const answeringSessio
 session.answers.push(direction===session.direction);session.eyes[session.eye]??={levels:[]};
 if(session.answers.length===5){const passed=evaluateLevel(session.answers);session.eyes[session.eye].levels.push({acuity:LEVELS[session.level],correct:session.answers.filter(Boolean).length,passed});session.answers=[];
 if(!passed || session.level===LEVELS.length-1){if(session.eye===0){session.eye=1;session.level=0;busy=false;navigate('eyeIntro');return;}
-completed={id:crypto.randomUUID(),date:new Date().toISOString(),version:VERSION,mode:session.mode,...(session.mode==='numbers'?{numberStyle:NUMBER_STYLE}:{}),distanceM:3,glasses:session.glasses,pxPerMm:state.calibration.pxPerMm,eyes:session.eyes};state.records.unshift(completed);state.records=state.records.slice(0,300);save();session=null;busy=false;navigate('result');return;}session.level++;}
+completed={id:session.id,date:new Date().toISOString(),version:VERSION,mode:session.mode,...(session.mode==='numbers'?{numberStyle:NUMBER_STYLE}:{}),distanceM:3,glasses:session.glasses,pxPerMm:state.calibration.pxPerMm,eyes:session.eyes};state.records=state.records.filter(r=>r.id!==completed.id);state.records.unshift(completed);state.records=state.records.slice(0,300);save();session=null;busy=false;navigate('result');return;}session.level++;}
+// Save the next target before the blank interval, so refresh cannot replay an answer.
+session.direction=nextTarget();persistRoute();
 // Brief blank interval prevents a double tap from submitting two trials.
-$('#target').style.visibility='hidden';$$('[data-answer]').forEach(b=>b.disabled=true);setTimeout(()=>{if(page==='test' && session===answeringSession){session.direction=nextTarget();render();}busy=false;},450);}
+$('#target').style.visibility='hidden';$$('[data-answer]').forEach(b=>b.disabled=true);setTimeout(()=>{if(page==='test' && session===answeringSession){render();}busy=false;},450);}
 function exportRecords(records){const data={app:'kids-vision-check',version:VERSION,exportedAt:new Date().toISOString(),notice:'가정용 참고 결과. 임상 검증되지 않은 단계 통과 기록입니다.',records};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`kids-vision-check-v${VERSION}-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
 function requestDelete(id){
  if(!state.records.some(record=>record.id===id))return;
@@ -77,12 +102,18 @@ function confirmPendingDelete(){
 $('#delete-confirm').onclick=confirmPendingDelete;
 $('#delete-cancel').onclick=()=>$('#delete-dialog').close();
 $('#delete-dialog').addEventListener('close',()=>{pendingDelete=null;});
-$('.brand').onclick=e=>{e.preventDefault();if(session && !completed)abort();else navigate('home');};
+$('#stop-cancel').onclick=()=>$('#stop-dialog').close();
+$('#stop-confirm').onclick=confirmExit;
+$('#stop-dialog').addEventListener('close',()=>{pendingExit=null;});
+$('.brand').onclick=e=>{e.preventDefault();if(session && !completed)requestExit('home');else navigate('home');};
 let resizeTimer;function geometryChanged(){clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(['test','eyeIntro','practice','preparation'].includes(page)&&!calibrated()){session=null;completed=null;busy=false;toast('화면 크기가 달라졌어요. 자로 다시 맞춰 주세요.');navigate('calibration');}},200);}
 addEventListener('resize',geometryChanged);visualViewport?.addEventListener('resize',geometryChanged);
-addEventListener('keydown',e=>{if(page==='test' && session.mode!=='numbers' && !$('#guide').open && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();answer(e.key.replace('Arrow','').toLowerCase());}});
-addEventListener('keydown',e=>{if(page==='test' && session.mode==='numbers' && !$('#guide').open && /^[0-9]$/.test(e.key)){e.preventDefault();answer(e.key);}});
-addEventListener('beforeunload',e=>{if(page==='test'&&session){e.preventDefault();e.returnValue='';}});
-navigation=createAppNavigation({initial:routeSnapshot(),apply:restoreRoute,canLeave:canLeaveRoute,history:window.history,eventTarget:window});
-render();
+addEventListener('keydown',e=>{if(page==='test' && session.mode!=='numbers' && !['guide','stop-dialog','delete-dialog'].some(id=>$('#'+id).open) && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();answer(e.key.replace('Arrow','').toLowerCase());}});
+addEventListener('keydown',e=>{if(page==='test' && session.mode==='numbers' && !['guide','stop-dialog','delete-dialog'].some(id=>$('#'+id).open) && /^[0-9]$/.test(e.key)){e.preventDefault();answer(e.key);}});
+addEventListener('pagehide',persistRoute);
+addEventListener('beforeunload',persistRoute);
+let resumed=null;try{resumed=loadProgress(sessionStorage);}catch{}
+if(resumed)restoreRoute(resumed.snapshot,{resume:true,paintNow:false});
+navigation=createAppNavigation({initial:routeSnapshot(),restored:resumed?.navigation,apply:restoreRoute,canLeave:canLeaveRoute,history:window.history,eventTarget:window});
+booting=false;paint();
 offlineUI=initOffline({canUpdate:()=>page==='home'&&!session&&!$('#delete-dialog').open,storageIssue:()=>saveAvailable?'':'기록 저장에 문제가 있어요. 중요한 기록을 내보내 주세요.'});

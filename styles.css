@@ -43,3 +43,5 @@ header{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:8px;position:r
 .brand{display:inline-flex;align-items:center;gap:7px;text-decoration:none}
 .brand-flower{display:inline-flex;align-items:center;justify-content:center;flex:0 0 1em;line-height:1;vertical-align:initial;margin:0;font-size:1.35em}
 .brand-title{display:block;min-width:0;line-height:1.45}
+
+.test-top{flex-wrap:wrap}.test-top span:first-child{flex:1;min-width:140px}.test-top .ghost{padding:10px 12px}
