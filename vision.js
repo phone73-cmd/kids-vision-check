@@ -1,5 +1,5 @@
 // Geometry: decimal acuity 1.0 is a 5 arc-minute optotype at 3 m.
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 export const DISTANCE_MM = 3000;
 export const LEVELS = [0.2, 0.25, 0.32, 0.4, 0.5, 0.63, 0.8, 1, 1.25, 1.5];
 export const DIRECTIONS = ['right', 'down', 'left', 'up'];
